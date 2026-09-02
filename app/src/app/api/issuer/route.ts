@@ -4,6 +4,7 @@ import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import { TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import devnetConfig from "@/constants/devnet-config.json";
 import idl from "@/constants/campus_points.json";
 
@@ -35,31 +36,55 @@ class NodeWallet {
   }
 }
 
-function getAuthorityKeypair(): Keypair {
-  const walletPath = path.resolve(process.env.HOME || "", ".config/solana/id.json");
-  const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf-8")));
-  return Keypair.fromSecretKey(secretKey);
+function getAuthorityKeypair(): Keypair | null {
+  try {
+    if (process.env.AUTHORITY_SECRET_KEY) {
+      const secret = Uint8Array.from(JSON.parse(process.env.AUTHORITY_SECRET_KEY));
+      return Keypair.fromSecretKey(secret);
+    }
+    const walletPath = path.resolve(process.env.HOME || "", ".config/solana/id.json");
+    if (fs.existsSync(walletPath)) {
+      const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf-8")));
+      return Keypair.fromSecretKey(secretKey);
+    }
+  } catch (err) {
+    console.error("Chave de autoridade nao encontrada:", err);
+  }
+  return null;
 }
 
-const REGISTRY_FILE = path.resolve(process.cwd(), ".issuers_registry.json");
+const REGISTRY_FILE = path.join(os.tmpdir(), "issuers_registry.json");
+
+declare global {
+  var __issuers_registry: string[] | undefined;
+}
 
 function getRegisteredIssuers(): string[] {
-  if (!fs.existsSync(REGISTRY_FILE)) {
-    return [devnetConfig.issuerAuthority];
+  if (globalThis.__issuers_registry) {
+    return globalThis.__issuers_registry;
   }
-  try {
-    const list = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf-8"));
-    return Array.from(new Set([devnetConfig.issuerAuthority, ...list]));
-  } catch {
-    return [devnetConfig.issuerAuthority];
+  if (fs.existsSync(REGISTRY_FILE)) {
+    try {
+      const list = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf-8"));
+      globalThis.__issuers_registry = Array.from(new Set([devnetConfig.issuerAuthority, ...list]));
+      return globalThis.__issuers_registry;
+    } catch {
+      // fallback
+    }
   }
+  return [devnetConfig.issuerAuthority];
 }
 
 function saveRegisteredIssuer(address: string) {
   const current = getRegisteredIssuers();
   if (!current.includes(address)) {
     current.push(address);
-    fs.writeFileSync(REGISTRY_FILE, JSON.stringify(current, null, 2));
+    globalThis.__issuers_registry = current;
+    try {
+      fs.writeFileSync(REGISTRY_FILE, JSON.stringify(current, null, 2));
+    } catch (err) {
+      console.error("Falha ao salvar registry:", err);
+    }
   }
 }
 
@@ -70,10 +95,17 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const { action, targetWallet, points, dailyLimit } = await req.json();
+    const authorityKeypair = getAuthorityKeypair();
+
+    if (!authorityKeypair) {
+      return NextResponse.json(
+        { error: "Autoridade institucional nao configurada no backend da Vercel." },
+        { status: 400 }
+      );
+    }
+
     const rpcUrl = "https://devnet.helius-rpc.com/?api-key=99a74efc-f197-45d6-a462-1ef1672319aa";
     const connection = new Connection(rpcUrl, "confirmed");
-
-    const authorityKeypair = getAuthorityKeypair();
     const wallet = new NodeWallet(authorityKeypair);
     const provider = new AnchorProvider(connection, wallet, { commitment: "confirmed" });
     const program = new Program(idl as any, provider);

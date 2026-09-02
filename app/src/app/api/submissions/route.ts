@@ -1,20 +1,41 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import os from "os";
 
-const DATA_FILE = path.resolve(process.cwd(), ".submissions_cache.json");
+// /tmp e o unico diretorio com permissao de escrita no ambiente da Vercel
+const DATA_FILE = path.join(os.tmpdir(), "submissions_cache.json");
 
-function readSubmissions() {
-  if (!fs.existsSync(DATA_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-  } catch {
-    return [];
+declare global {
+  var __submissions_cache: any[] | undefined;
+}
+
+function readSubmissions(): any[] {
+  if (globalThis.__submissions_cache && Array.isArray(globalThis.__submissions_cache)) {
+    return globalThis.__submissions_cache;
   }
+  if (fs.existsSync(DATA_FILE)) {
+    try {
+      const raw = fs.readFileSync(DATA_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        globalThis.__submissions_cache = parsed;
+        return parsed;
+      }
+    } catch {
+      // continua para fallback
+    }
+  }
+  return [];
 }
 
 function writeSubmissions(data: any[]) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  globalThis.__submissions_cache = data;
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("Falha ao persistir em /tmp:", err);
+  }
 }
 
 export async function GET() {
@@ -23,18 +44,29 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  const current = readSubmissions();
-  const updated = [body, ...current];
-  writeSubmissions(updated);
-  return NextResponse.json({ success: true, item: body });
+  try {
+    const body = await req.json();
+    const current = readSubmissions();
+    const updated = [body, ...current];
+    writeSubmissions(updated);
+    return NextResponse.json({ success: true, item: body });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err.message || "Erro ao processar submissao" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function DELETE(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
-  const current = readSubmissions();
-  const filtered = current.filter((sub: any) => sub.id !== id);
-  writeSubmissions(filtered);
-  return NextResponse.json({ success: true });
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    const current = readSubmissions();
+    const filtered = current.filter((sub: any) => sub.id !== id);
+    writeSubmissions(filtered);
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }

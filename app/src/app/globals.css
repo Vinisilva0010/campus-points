@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-base: #f9f1f5;
+  --color-primary: #381af8;
+  --color-highlight: #fc67f4;
+}
+
+body {
+  background-color: var(--color-base);
+  color: #000000;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Customizacao dos botoes da carteira */
+.wallet-adapter-button {
+  background-color: #381af8 !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  border-radius: 0.75rem !important;
+  padding: 0.75rem 1.25rem !important;
+  font-size: 0.875rem !important;
+  transition: transform 0.1s ease !important;
+}
+.wallet-adapter-button:active {
+  transform: scale(0.97);
+}

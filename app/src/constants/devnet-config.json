@@ -1,0 +1,24 @@
+{
+  "programId": "53sEPq9sSPaaYHYf3MdjMXjqMPpRBLpxTSyWs7EMo5Bb",
+  "mint": "CPi3yJBCqL3p6gGSLq1kqPT5RWp1qbT7RgbdveV9ZpPR",
+  "configPda": "2sbQ9ZoZ7mNYP5RRjQXTSzVhdCjzp6NdD46JBtzEJ7t2",
+  "issuerAuthority": "7aSDp11gPbCCew7yMSQKuBLr6pcKfgwRPtp2QgAE89f3",
+  "issuerPda": "DfbVUT5GfC1k3v5GeBrhMicRUBkKqghvjs6JhtRZv1QN",
+  "rewards": [
+    {
+      "id": 1,
+      "cost": 30,
+      "name": "Café Especial no DCE"
+    },
+    {
+      "id": 2,
+      "cost": 75,
+      "name": "Crédito R$ 15 em Xerox"
+    },
+    {
+      "id": 3,
+      "cost": 150,
+      "name": "Camiseta Atlética 2026"
+    }
+  ]
+}

@@ -1,3 +1,99 @@
+Roadmap do Projeto (Fases 0 a 5)
+Fase 0: Auditoria de Ambiente e Estrutura Inicial
+
+Verificação de versões locais (solana, anchor, rustc, node, pnpm).
+
+Criação do diretório raiz e scaffold inicial do Anchor e do Frontend.
+
+Fase 1: Programa Anchor com Token-2022 (Rust)
+
+Configuração de dependências (Cargo.toml).
+
+Implementação dos estados, contas PDA e erros.
+
+Implementação das instruções: initialize, register_issuer, issue_points e redeem_reward.
+
+Compilação local com anchor build.
+
+Fase 2: Bateria de Testes Automatizados (TypeScript)
+
+Script completo de testes on-chain.
+
+Teste de inicialização e emissão autorizada.
+
+Teste de bloqueio de transferência (prova criptográfica do Soulbound).
+
+Teste de queima/resgate de recompensa e validação de saldo.
+
+Execução local com anchor test.
+
+Fase 3: Deploy e Inicialização na Devnet
+
+Configuração da carteira de deploy e sincronização do Program ID.
+
+Deploy do programa na Devnet da Solana.
+
+Execução do script de setup inicial (criação da mint e registro do emissor).
+
+Fase 4: Frontend Completo (Next.js + Tailwind + Wallet Adapter)
+
+Scaffold do Next.js e instalação das dependências de carteira e Anchor.
+
+Integração do IDL e tipos do contrato.
+
+Construção das interfaces:
+
+Dashboard do Aluno (saldo e histórico).
+
+Mural de Missões do Mês.
+
+Ranking (Leaderboard).
+
+Loja de Recompensas (botão de resgate com burn on-chain).
+
+Painel do Emissor / Admin (emissão de pontos).
+
+Alternador de perfil (Aluno / Admin) para a banca testar em 1 clique.
+
+Fase 5: Teste Ponta a Ponta e Roteiro do Vídeo
+
+Validação de todo o fluxo na Devnet direto pelo navegador.
+
+Roteiro fechado de apresentação e gravação do pitch de 2 a 3 minutos para a Superteam.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # campus-points
 
 Campus Points — Documento Conceitual e de Produto

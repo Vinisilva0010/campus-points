@@ -26,6 +26,7 @@ import {
   Send,
   Check,
   UserPlus,
+  Users,
 } from "lucide-react";
 
 interface Mission {
@@ -148,7 +149,16 @@ export default function CampusPointsApp() {
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // Fila real de submissoes sincronizada via API
+  // Status de Coordenador da Carteira Conectada
+  const [isAuthorizedIssuer, setIsAuthorizedIssuer] = useState<boolean>(false);
+  const [issuerDailyLimit, setIssuerDailyLimit] = useState<number>(1000);
+  const [registeredIssuersList, setRegisteredIssuersList] = useState<string[]>([CONTRACT_CONFIG.issuerAuthority]);
+
+  // Formulario de cadastro de nova coordenadora
+  const [newCoordinatorInput, setNewCoordinatorInput] = useState<string>("");
+  const [newQuotaInput, setNewQuotaInput] = useState<string>("1000");
+
+  // Fila de submissoes
   const [submissions, setSubmissions] = useState<PendingSubmission[]>([]);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState<boolean>(false);
 
@@ -169,7 +179,46 @@ export default function CampusPointsApp() {
     return new (Program as any)(IDL, provider);
   }, [provider]);
 
-  // Sincronizar Fila via API
+  // Checar se a carteira conectada e coordenadora ativa no contrato
+  const checkIssuerStatus = async () => {
+    if (!wallet.publicKey) {
+      setIsAuthorizedIssuer(false);
+      return;
+    }
+
+    try {
+      const [issuerPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("issuer"), wallet.publicKey.toBuffer()],
+        programId
+      );
+
+      const info = await connection.getAccountInfo(issuerPda);
+      if (info && info.data.length > 0) {
+        setIsAuthorizedIssuer(true);
+      } else if (wallet.publicKey.toBase58() === CONTRACT_CONFIG.issuerAuthority) {
+        setIsAuthorizedIssuer(true);
+      } else {
+        setIsAuthorizedIssuer(false);
+      }
+    } catch {
+      setIsAuthorizedIssuer(false);
+    }
+  };
+
+  // Carregar lista de coordenadoras cadastradas
+  const fetchRegisteredIssuers = async () => {
+    try {
+      const res = await fetch("/api/issuer");
+      const data = await res.json();
+      if (data.issuers && Array.isArray(data.issuers)) {
+        setRegisteredIssuersList(data.issuers);
+      }
+    } catch (err) {
+      console.error("Erro ao puxar coordenadoras:", err);
+    }
+  };
+
+  // Sincronizar Fila de Submissoes via API
   const fetchSubmissions = async () => {
     try {
       setIsLoadingSubmissions(true);
@@ -183,7 +232,7 @@ export default function CampusPointsApp() {
     }
   };
 
-  // Leitura de Saldo
+  // Leitura de Saldo Estudantil
   const fetchBalance = async () => {
     if (!wallet.publicKey) {
       setBalance(0);
@@ -211,7 +260,7 @@ export default function CampusPointsApp() {
     }
   };
 
-  // Leitura do Ranking Real On-Chain via getTokenLargestAccounts
+  // Leitura do Ranking Real On-Chain
   const fetchLeaderboard = async () => {
     try {
       setIsLoadingLeaderboard(true);
@@ -244,11 +293,12 @@ export default function CampusPointsApp() {
     }
   };
 
-  // Carregamento inicial e polling de submissoes
   useEffect(() => {
     fetchBalance();
     fetchLeaderboard();
     fetchSubmissions();
+    checkIssuerStatus();
+    fetchRegisteredIssuers();
 
     const interval = setInterval(() => {
       fetchSubmissions();
@@ -257,7 +307,7 @@ export default function CampusPointsApp() {
     return () => clearInterval(interval);
   }, [wallet.publicKey, connection]);
 
-  // Aluno submete comprovante
+  // Aluno protocolar comprovante
   const handleStudentSubmit = async (mission: Mission) => {
     if (!wallet.publicKey) {
       setStatusMessage({ type: "error", text: "Conecte sua carteira para protocolar a missao." });
@@ -269,7 +319,7 @@ export default function CampusPointsApp() {
       missionTitle: mission.title,
       studentAddress: wallet.publicKey.toBase58(),
       points: mission.points,
-      proofNote: `Comprovante protocolado para atividade ${mission.category}.`,
+      proofNote: `Comprovante protocolado para ${mission.category}.`,
       timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     };
 
@@ -282,7 +332,7 @@ export default function CampusPointsApp() {
 
       setStatusMessage({
         type: "success",
-        text: `Solicitacao enviada para a Coordenacao. O coordenador ja pode aprova-la em qualquer navegador.`,
+        text: `Solicitacao enviada. A coordenacao pode aprovar pelo painel em qualquer dispositivo.`,
       });
       await fetchSubmissions();
     } catch (err: any) {
@@ -290,80 +340,108 @@ export default function CampusPointsApp() {
     }
   };
 
-  // Registrar a carteira conectada de qualquer avaliador como Emissor
-  const handleRegisterAsIssuer = async () => {
-    if (!wallet.publicKey) {
-      setStatusMessage({ type: "error", text: "Conecte sua carteira primeiro." });
+  // Cadastrar nova carteira de Coordenadora on-chain
+  const handleRegisterCoordinator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = newCoordinatorInput.trim();
+    if (!target) {
+      setStatusMessage({ type: "error", text: "Informe o endereco da carteira da coordenadora." });
+      return;
+    }
+
+    try {
+      new PublicKey(target);
+    } catch {
+      setStatusMessage({ type: "error", text: "Endereco de carteira Solana invalido." });
       return;
     }
 
     try {
       setIsProcessing(true);
-      setStatusMessage({ type: "info", text: "Credenciando sua carteira como Emissora Oficial na Devnet..." });
+      setStatusMessage({ type: "info", text: `Cadastrando ${target.slice(0, 8)}... como Coordenadora Oficial no contrato...` });
 
       const res = await fetch("/api/issuer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "register_issuer",
-          targetWallet: wallet.publicKey.toBase58(),
+          targetWallet: target,
+          dailyLimit: Number(newQuotaInput) || 1000,
         }),
       });
-      const data = await res.json();
 
+      const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
       setStatusMessage({
         type: "success",
-        text: `Carteira credenciada com sucesso no contrato. Cota diaria de 1.000 pontos liberada. TX: ${data.tx.slice(0, 10)}...`,
+        text: `Coordenadora cadastrada com sucesso. Cota diaria de ${newQuotaInput} pts liberada. TX: ${data.tx.slice(0, 10)}...`,
       });
+
+      setNewCoordinatorInput("");
+      await fetchRegisteredIssuers();
+      await checkIssuerStatus();
     } catch (err: any) {
-      setStatusMessage({ type: "error", text: `Falha no credenciamento: ${err.message}` });
+      setStatusMessage({ type: "error", text: `Erro no cadastro: ${err.message}` });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Coordenador aprova e emite on-chain
+  // Coordenador aprova e emite pontos on-chain
   const handleApproveAndIssue = async (sub: PendingSubmission) => {
     try {
       setIsProcessing(true);
       setStatusMessage({ type: "info", text: `Emitindo ${sub.points} pontos on-chain para ${sub.studentAddress.slice(0, 6)}...` });
 
-      const isProtocolDeployer =
-        wallet.publicKey && wallet.publicKey.toBase58() === CONTRACT_CONFIG.issuerAuthority;
+      const recipientPubkey = new PublicKey(sub.studentAddress);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPublicKey,
+        recipientPubkey,
+        false,
+        TOKEN_2022_PROGRAM_ID
+      );
+      const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], programId);
 
-      // Se a carteira conectada for a proprietaria e tiver anchor, assina direto
-      if (isProtocolDeployer && program) {
-        const recipientPubkey = new PublicKey(sub.studentAddress);
-        const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], programId);
+      // Se a carteira conectada estiver autorizada e tiver sol para taxa, assina direto
+      if (isAuthorizedIssuer && program && wallet.publicKey) {
         const [issuerPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("issuer"), wallet.publicKey.toBuffer()],
           programId
         );
-        const recipientAta = getAssociatedTokenAddressSync(
-          mintPublicKey,
-          recipientPubkey,
-          false,
-          TOKEN_2022_PROGRAM_ID
-        );
 
-        await program.methods
-          .issuePoints(new BN(sub.points))
-          .accounts({
-            issuer: wallet.publicKey,
-            issuerAccount: issuerPda,
-            campusConfig: configPda,
-            mint: mintPublicKey,
-            recipient: recipientPubkey,
-            recipientTokenAccount: recipientAta,
-            token2022Program: TOKEN_2022_PROGRAM_ID,
-            associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
-            systemProgram: anchor.web3.SystemProgram.programId,
-          })
-          .rpc();
+        try {
+          await program.methods
+            .issuePoints(new BN(sub.points))
+            .accounts({
+              issuer: wallet.publicKey,
+              issuerAccount: issuerPda,
+              campusConfig: configPda,
+              mint: mintPublicKey,
+              recipient: recipientPubkey,
+              recipientTokenAccount: recipientAta,
+              token2022Program: TOKEN_2022_PROGRAM_ID,
+              associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .rpc();
+        } catch (directErr: any) {
+          // Fallback caso a carteira conectada esteja sem saldo Devnet SOL para gas
+          console.warn("Assinatura direta falhou, acionando relayer subsidiado:", directErr);
+          const res = await fetch("/api/issuer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "subsidized_issue",
+              targetWallet: sub.studentAddress,
+              points: sub.points,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+        }
       } else {
-        // Para qualquer outro avaliador ou teste cross-browser, usa o relayer subsidiado institucional
+        // Fallback subsidiado pela autoridade principal
         const res = await fetch("/api/issuer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -377,13 +455,12 @@ export default function CampusPointsApp() {
         if (!res.ok) throw new Error(data.error);
       }
 
-      // Deleta da fila compartilhada
       await fetch(`/api/submissions?id=${sub.id}`, { method: "DELETE" });
       await fetchSubmissions();
 
       setStatusMessage({
         type: "success",
-        text: `Missao aprovada. ${sub.points} pontos emitidos on-chain para ${sub.studentAddress.slice(0, 8)}...`,
+        text: `Missao homologada. ${sub.points} pontos emitidos on-chain para ${sub.studentAddress.slice(0, 8)}...`,
       });
 
       await fetchBalance();
@@ -398,7 +475,7 @@ export default function CampusPointsApp() {
     }
   };
 
-  // Queima e Resgate
+  // Resgate de pontos com queima on-chain
   const handleRedeemReward = async (rewardId: number, cost: number, rewardName: string) => {
     if (!program || !wallet.publicKey) {
       setStatusMessage({ type: "error", text: "Conecte sua carteira para resgatar." });
@@ -488,11 +565,11 @@ export default function CampusPointsApp() {
         <div className="max-w-5xl mx-auto mt-3 pt-3 border-t border-neutral-200 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center">
             <span className="text-xs font-black uppercase tracking-wider text-black mr-2">
-              Perfil Ativo de Demonstracao:
+              Perfil de Demonstracao:
             </span>
             <Tooltip
-              title="Alternador de Perfil"
-              content="Alterne entre o perfil do Aluno (saldo, missoes, queima) e o perfil da Coordenacao (fila de aprovacao sincronizada)."
+              title="Alternador de Papel"
+              content="Alterne entre o perfil do Aluno (saldo, missoes, queima) e o perfil da Coordenacao (cadastro de emissores e aprovacao)."
             />
           </div>
 
@@ -544,7 +621,7 @@ export default function CampusPointsApp() {
               onClick={() => setStatusMessage(null)}
               className="text-sm font-black p-1 hover:bg-black/10 rounded"
             >
-              ✕
+              X
             </button>
           </div>
         </div>
@@ -606,7 +683,7 @@ export default function CampusPointsApp() {
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-black bg-[#381af8] text-white shadow"
             >
               <ShieldCheck className="w-4 h-4" />
-              Fila de Aprovacao ({submissions.length})
+              Terminal da Coordenacao e Emissores
             </button>
           )}
         </div>
@@ -675,7 +752,7 @@ export default function CampusPointsApp() {
                     Cotas Controladas
                   </div>
                   <p className="text-xs font-bold text-neutral-800 mt-1">
-                    Emissoes limitadas a 1.000 pts/dia por emissor institucional.
+                    Emissoes limitadas por coordenadora cadastrada.
                   </p>
                 </div>
               </div>
@@ -937,62 +1014,160 @@ export default function CampusPointsApp() {
         )}
 
         {/* ======================================================== */}
-        {/* ABA: PAINEL DO COORDENADOR / ADMIN (FILA DE APROVACAO) */}
+        {/* ABA: PAINEL DO COORDENADOR / ADMIN */}
         {/* ======================================================== */}
         {(activeTab === "issuer" || viewMode === "admin") && (
           <div className="space-y-6">
+            {/* Status da Carteira Conectada */}
             <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-neutral-300 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-4 pb-4 border-b-2 border-neutral-200">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wider text-neutral-600">
+                    Status da Carteira Conectada
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-base sm:text-lg font-black text-black font-mono">
+                      {wallet.publicKey ? `${wallet.publicKey.toBase58().slice(0, 10)}...${wallet.publicKey.toBase58().slice(-8)}` : "Desconectada"}
+                    </span>
+                    {isAuthorizedIssuer ? (
+                      <span className="px-2.5 py-1 text-xs font-black uppercase rounded-lg bg-green-100 border border-green-600 text-green-800">
+                        Coordenadora Autorizada
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 text-xs font-black uppercase rounded-lg bg-neutral-200 border border-neutral-400 text-neutral-800">
+                        Apenas Aluno / Nao Autorizada
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="text-xs font-black uppercase tracking-wider text-neutral-600">
+                    Cota Diaria Ativa
+                  </div>
+                  <div className="text-lg font-black text-[#381af8]">
+                    {isAuthorizedIssuer ? `${issuerDailyLimit} Pontos / Dia` : "0 Pontos"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Formulario de Cadastro de Nova Coordenadora */}
+              <div className="mt-4 p-5 bg-[#f9f1f5] rounded-2xl border-2 border-neutral-300">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-base font-black text-black flex items-center gap-2">
+                      <UserPlus className="w-5 h-5 text-[#381af8]" />
+                      Cadastrar Nova Carteira de Coordenadora On-Chain
+                    </h3>
+                    <p className="text-xs font-bold text-neutral-700 mt-0.5">
+                      Autorize a carteira da universidade ou de um jurado para que ele possa emitir pontos.
+                    </p>
+                  </div>
+                  <Tooltip
+                    title="Registro de Coordenador"
+                    content="Dispara a instrucao registerIssuer no contrato. Uma PDA issuer e criada e a carteira ganha cota propria de emissao."
+                  />
+                </div>
+
+                <form onSubmit={handleRegisterCoordinator} className="space-y-3 mt-3">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        required
+                        value={newCoordinatorInput}
+                        onChange={(e) => setNewCoordinatorInput(e.target.value)}
+                        placeholder="Cole o endereco da carteira da coordenadora (Solana)"
+                        className="w-full px-4 py-3 rounded-xl border-2 border-neutral-400 text-xs font-black text-black bg-white focus:outline-none focus:border-[#381af8]"
+                      />
+                    </div>
+
+                    {wallet.publicKey && (
+                      <button
+                        type="button"
+                        onClick={() => setNewCoordinatorInput(wallet.publicKey?.toBase58() || "")}
+                        className="px-4 py-3 bg-white border-2 border-neutral-400 hover:border-black text-xs font-black text-black rounded-xl transition-colors whitespace-nowrap"
+                      >
+                        Usar Carteira Conectada
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    <div className="w-full sm:w-48">
+                      <label className="block text-[11px] font-black uppercase text-neutral-700 mb-1">
+                        Cota Diaria (PTS):
+                      </label>
+                      <input
+                        type="number"
+                        min="100"
+                        max="10000"
+                        value={newQuotaInput}
+                        onChange={(e) => setNewQuotaInput(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border-2 border-neutral-400 text-xs font-black text-black bg-white focus:outline-none focus:border-[#381af8]"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isProcessing}
+                      className="w-full sm:flex-1 sm:mt-5 py-3 px-6 rounded-xl bg-[#381af8] text-white font-black text-xs shadow hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Check className="w-4 h-4 text-white" />
+                      {isProcessing ? "Registrando On-Chain..." : "Autorizar Coordenadora no Contrato"}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Lista de Coordenadoras Cadastradas */}
+                <div className="mt-4 pt-3 border-t border-neutral-300">
+                  <div className="text-[11px] font-black uppercase tracking-wider text-neutral-700 mb-2 flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-black" />
+                    Coordenadoras Registradas no Ecossistema:
+                  </div>
+                  <div className="space-y-1.5">
+                    {registeredIssuersList.map((addr) => (
+                      <div
+                        key={addr}
+                        className="p-2 bg-white rounded-lg border border-neutral-300 text-xs font-black text-black flex items-center justify-between"
+                      >
+                        <span className="font-mono">{addr}</span>
+                        {addr === CONTRACT_CONFIG.issuerAuthority && (
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-neutral-200 rounded">
+                            Master
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Fila de Aprovacao de Missoes */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-neutral-300 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-2xl font-black text-black">
                     Fila de Aprovacao de Missoes (1 Clique)
                   </h2>
                   <p className="text-sm font-bold text-neutral-700">
-                    Submissoes sincronizadas entre navegadores via API central do campus.
+                    Solicitacoes enviadas pelos estudantes. Nao requer digitacao manual de carteiras.
                   </p>
                 </div>
-
-                {/* Botao de Credenciamento para Avaliadores */}
-                {wallet.publicKey && (
-                  <button
-                    onClick={handleRegisterAsIssuer}
-                    disabled={isProcessing}
-                    className="px-4 py-2.5 bg-neutral-100 border-2 border-neutral-400 hover:border-black rounded-xl text-xs font-black text-black flex items-center gap-2 transition-colors"
-                  >
-                    <UserPlus className="w-4 h-4 text-[#381af8]" />
-                    Credenciar Minha Carteira como Emissora Oficial
-                  </button>
-                )}
+                <Tooltip
+                  title="Aprovacao Automatizada"
+                  content="Qualquer coordenadora autorizada pode clicar em 'Aprovar e Emitir' para homologar os pontos on-chain."
+                />
               </div>
 
-              {/* Status do Emissor */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                <div className="p-4 bg-[#f9f1f5] rounded-xl border-2 border-neutral-300">
-                  <span className="text-xs font-black uppercase text-neutral-600">
-                    Autoridade On-Chain Principal:
-                  </span>
-                  <p className="text-xs font-black text-black break-all mt-1">
-                    {CONTRACT_CONFIG.issuerAuthority}
-                  </p>
-                </div>
-                <div className="p-4 bg-[#f9f1f5] rounded-xl border-2 border-neutral-300">
-                  <span className="text-xs font-black uppercase text-neutral-600">
-                    Cota Diaria Restante:
-                  </span>
-                  <p className="text-base font-black text-[#381af8] mt-1">
-                    1.000 Pontos / Dia
-                  </p>
-                </div>
-              </div>
-
-              {/* Lista Real de Pendencias */}
               {isLoadingSubmissions ? (
                 <div className="p-8 text-center text-sm font-black text-neutral-700">
                   Atualizando fila de submissoes...
                 </div>
               ) : submissions.length === 0 ? (
                 <div className="p-8 text-center rounded-2xl border-2 border-dashed border-neutral-300 text-sm font-black text-neutral-600">
-                  Nenhuma solicitacao de missao pendente no momento. Entre como aluno em qualquer navegador e submeta uma missao.
+                  Nenhuma solicitacao de missao pendente no momento.
                 </div>
               ) : (
                 <div className="space-y-4">

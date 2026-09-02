@@ -14,9 +14,35 @@ function getAuthorityWallet() {
   return anchor.web3.Keypair.fromSecretKey(secretKey);
 }
 
+const REGISTRY_FILE = path.resolve(process.cwd(), ".issuers_registry.json");
+
+function getRegisteredIssuers(): string[] {
+  if (!fs.existsSync(REGISTRY_FILE)) {
+    return [devnetConfig.issuerAuthority];
+  }
+  try {
+    const list = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf-8"));
+    return Array.from(new Set([devnetConfig.issuerAuthority, ...list]));
+  } catch {
+    return [devnetConfig.issuerAuthority];
+  }
+}
+
+function saveRegisteredIssuer(address: string) {
+  const current = getRegisteredIssuers();
+  if (!current.includes(address)) {
+    current.push(address);
+    fs.writeFileSync(REGISTRY_FILE, JSON.stringify(current, null, 2));
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({ issuers: getRegisteredIssuers() });
+}
+
 export async function POST(req: Request) {
   try {
-    const { action, targetWallet, points } = await req.json();
+    const { action, targetWallet, points, dailyLimit } = await req.json();
     const rpcUrl = "https://devnet.helius-rpc.com/?api-key=99a74efc-f197-45d6-a462-1ef1672319aa";
     const connection = new anchor.web3.Connection(rpcUrl, "confirmed");
     const authorityKeypair = getAuthorityWallet();
@@ -34,10 +60,10 @@ export async function POST(req: Request) {
       programId
     );
 
-    // Acao 1: Registrar a carteira do jurado/avaliador como emissora oficial
     if (action === "register_issuer") {
+      const quota = dailyLimit ? new BN(Number(dailyLimit)) : new BN(1000);
       const tx = await (program.methods as any)
-        .registerIssuer(new BN(1000), true)
+        .registerIssuer(quota, true)
         .accounts({
           authority: authorityKeypair.publicKey,
           campusConfig: configPda,
@@ -47,10 +73,10 @@ export async function POST(req: Request) {
         })
         .rpc();
 
-      return NextResponse.json({ success: true, tx });
+      saveRegisteredIssuer(targetPubkey.toBase58());
+      return NextResponse.json({ success: true, tx, issuer: targetPubkey.toBase58() });
     }
 
-    // Acao 2: Emissao subsidiada pela autoridade para quem nao tem Devnet SOL
     if (action === "subsidized_issue") {
       const [authIssuerPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("issuer"), authorityKeypair.publicKey.toBuffer()],

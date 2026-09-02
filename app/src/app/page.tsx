@@ -364,25 +364,55 @@ export default function CampusPointsApp() {
 
     try {
       setIsProcessing(true);
-      setStatusMessage({ type: "info", text: `Cadastrando ${target.slice(0, 8)}... como Coordenadora Oficial no contrato...` });
+      const targetPubkey = new PublicKey(target);
+      const isMasterAuthority = wallet.publicKey && wallet.publicKey.toBase58() === CONTRACT_CONFIG.issuerAuthority;
 
-      const res = await fetch("/api/issuer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "register_issuer",
-          targetWallet: target,
-          dailyLimit: Number(newQuotaInput) || 1000,
-        }),
-      });
+      // Se a carteira master estiver conectada no navegador, assina direto on-chain via Phantom
+      if (isMasterAuthority && program && wallet.publicKey) {
+        setStatusMessage({ type: "info", text: `Autorizando ${target.slice(0, 6)}... diretamente via contrato...` });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+        const [configPda] = PublicKey.findProgramAddressSync([Buffer.from("config")], programId);
+        const [targetIssuerPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("issuer"), targetPubkey.toBuffer()],
+          programId
+        );
 
-      setStatusMessage({
-        type: "success",
-        text: `Coordenadora cadastrada com sucesso. Cota diaria de ${newQuotaInput} pts liberada. TX: ${data.tx.slice(0, 10)}...`,
-      });
+        const tx = await program.methods
+          .registerIssuer(new BN(Number(newQuotaInput) || 1000), true)
+          .accounts({
+            authority: wallet.publicKey,
+            campusConfig: configPda,
+            issuerAuthority: targetPubkey,
+            issuerAccount: targetIssuerPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .rpc();
+
+        setStatusMessage({
+          type: "success",
+          text: `Coordenadora cadastrada on-chain com sucesso! TX: ${tx.slice(0, 10)}...`,
+        });
+      } else {
+        // Fallback para API caso seja teste sem a carteira master conectada
+        setStatusMessage({ type: "info", text: `Solicitando credenciamento de ${target.slice(0, 6)}... ao servidor...` });
+        const res = await fetch("/api/issuer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "register_issuer",
+            targetWallet: target,
+            dailyLimit: Number(newQuotaInput) || 1000,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        setStatusMessage({
+          type: "success",
+          text: `Coordenadora credenciada com sucesso! TX: ${data.tx.slice(0, 10)}...`,
+        });
+      }
 
       setNewCoordinatorInput("");
       await fetchRegisteredIssuers();

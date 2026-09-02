@@ -8,8 +8,11 @@ skip-lint = false
 [programs.localnet]
 campus_points = "53sEPq9sSPaaYHYf3MdjMXjqMPpRBLpxTSyWs7EMo5Bb"
 
+[programs.devnet]
+campus_points = "53sEPq9sSPaaYHYf3MdjMXjqMPpRBLpxTSyWs7EMo5Bb"
+
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

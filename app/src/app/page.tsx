@@ -180,7 +180,12 @@ export default function CampusPointsApp() {
   }, [provider]);
 
   // Checar se a carteira conectada e coordenadora ativa no contrato
-  const checkIssuerStatus = async () => {
+  const checkIssuerStatus = async (currentList?: string[]) => {
+    const listToCheck = currentList || registeredIssuersList;
+    if (wallet.publicKey && listToCheck.includes(wallet.publicKey.toBase58())) {
+      setIsAuthorizedIssuer(true);
+      return;
+    }
     if (!wallet.publicKey) {
       setIsAuthorizedIssuer(false);
       return;
@@ -212,6 +217,7 @@ export default function CampusPointsApp() {
       const data = await res.json();
       if (data.issuers && Array.isArray(data.issuers)) {
         setRegisteredIssuersList(data.issuers);
+        await checkIssuerStatus(data.issuers);
       }
     } catch (err) {
       console.error("Erro ao puxar coordenadoras:", err);

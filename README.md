@@ -126,7 +126,7 @@ cd app
 yarn install
 yarn dev
 ```
-Acesse a aplicacao em `http://localhost:3000`.
+
 
 ---
 
